@@ -1,0 +1,280 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+
+
+library(DESeq2)
+library(dplyr)
+library(S4Vectors)
+library(readr)
+
+proseq_data = read_tsv("../../peak_calling_analysis_pipeline/proseq_data/Risca001_DEseq_spikeNorm_h1low.vs.scr_results_table.txt", col_names = TRUE, show_col_types = FALSE)
+
+proseq_data
+```
+
+
+
+
+```{r}
+
+proseq_data <- proseq_data %>%
+  rename(
+    gene_id = ID,
+    gene_symbol = symbol,
+    baseMean = baseMean_h1low.vs.scr,
+    log2FoldChange = log2FoldChange_h1low.vs.scr,
+    lfcSE = lfcSE_h1low.vs.scr,
+    stat = stat_h1low.vs.scr,
+    pval = pvalue_h1low.vs.scr,
+    padj = padj_h1low.vs.scr
+    # pvalue and padj columns if they exist — add those too
+  )
+
+
+# proseq_res = as(as.data.frame(proseq_data), "DESeqResults")
+
+# plotMA(proseq_data, ylim = c(-2,2))
+
+proseq_data
+
+```
+
+
+```{r}
+
+
+# # keep only DESeq2 result summary columns
+# res_cols <- c("baseMean", "log2FoldChange", "lfcSE", "stat")
+# res_data <- proseq_data[, res_cols]
+# 
+# # make DESeqResults
+# res <- new("DESeqResults",
+#            listData = as.list(res_data),
+#            elementType = "numeric",
+#            elementMetadata = S4Vectors::DataFrame(
+#              type = rep("results", ncol(res_data))
+#            ),
+#            metadata = list())
+# 
+# rownames(res) <- proseq_data$gene_id
+# 
+# # check
+# res
+
+# keep only numeric DESeq2 result columns
+# res_data <- proseq_data %>%
+#   dplyr::select(baseMean, log2FoldChange, lfcSE, stat) %>% as.data.frame()
+# 
+# # now construct DESeqResults object CORRECTLY
+# # res <- DESeqResults(
+# #   mcols = S4Vectors::DataFrame(type = rep("results", ncol(res_data))),
+# #   nrow = nrow(res_data)
+# # )
+# 
+# # Build a SummarizedExperiment
+# se <- SummarizedExperiment::SummarizedExperiment(
+#   assays = list(data = as.matrix(res_data))
+# )
+
+
+# ---- custom MA plot ----
+# ggplot(proseq_data, aes(x = log10(baseMean + 1), y = log2FoldChange)) +
+#   geom_point(aes(color = stat), alpha = 0.4) +     # you can change "stat" to padj < 0.05 if you have it
+#   geom_hline(yintercept = 0, color = "red") +
+#   theme_bw() +
+#   labs(
+#     x = "log10(mean expression)",
+#     y = "log2 fold change",
+#     title = "MA Plot"
+#   )
+
+
+up_reg = proseq_data[which(proseq_data$padj < 0.05 & proseq_data$log2FoldChange >= 1) ,]
+        
+        
+down_reg = proseq_data[which(proseq_data$padj < 0.05 & proseq_data$log2FoldChange <= -1/1.5) ,]
+
+
+unchanging_reg = proseq_data[which(proseq_data$padj < 0.05 & proseq_data$log2FoldChange <1 & proseq_data$log2FoldChange > -1) ,]
+
+others_reg = proseq_data[which(proseq_data$padj > 0.05), ] 
+
+
+total <- nrow(proseq_data)
+up_pct <- round(100 * nrow(up_reg) / total, 1)
+down_pct <- round(100 * nrow(down_reg) / total, 1)
+ns_pct <- round(100 * nrow(others_reg) / total, 1)
+padj_only_pct <- round(100 * nrow(unchanging_reg) / total, 1)
+
+# Annotation text
+annotation_text <- paste0(
+"Upregulated geness: ", nrow(up_reg), " (", up_pct, "%)\n",
+"Downregulated genes: ", nrow(down_reg), " (", down_pct, "%)\n",
+"padj < 0.05 only: ", nrow(unchanging_reg), " (", padj_only_pct, "%)\n",
+"Not significant: ", nrow(others_reg), " (", ns_pct, "%)"
+)
+
+proseq_data$Label <- ifelse(proseq_data$padj > 0.05, "Not significant",
+                            ifelse(proseq_data$log2FoldChange >= 1 & proseq_data$padj < 0.05, "Upregulated genes",
+                            ifelse(proseq_data$log2FoldChange <= -1/1.5 & proseq_data$padj < 0.05, "Downregulated genes",
+                            ifelse(proseq_data$log2FoldChange >= 1 & proseq_data$padj > 0.05, "Not significant",
+                            ifelse(proseq_data$log2FoldChange <= -1/1.5 & proseq_data$padj > 0.05, "Not significant",
+                                    "padj < 0.05 only")))))
+
+ggplot(proseq_data, aes(x = baseMean, y = log2FoldChange, color = Label)) +
+        geom_point(alpha = 0.7, size = 0.5) +
+        geom_hline(yintercept = 0, linetype = "solid", color = "black") +
+        geom_hline(yintercept = c(-1/1.5, 1), linetype = "dashed", color = "black") +
+        scale_x_continuous(trans = "log10", 
+                            breaks = scales::trans_breaks("log10", function(x) 10^x),
+                            labels = scales::trans_format("log10", scales::math_format(10^.x))) +
+        scale_colour_manual(values = c("Upregulated genes" = "red",
+                                        "Downregulated genes" = "red",
+                                        "padj < 0.05 only" = "lightpink",
+                                        "Not significant" = "grey70"),
+                            breaks = c("Upregulated genes", "Downregulated genes", "padj < 0.05 only", "Not significant")) +
+        labs(title = "pro-seq H1low vs scrm",
+            x = "Mean pro-seq signal (log10 scale)",
+            y = expression(Log[2]~Fold~Change),
+            color = "proseq status") +
+        theme_classic(base_size = 4) +
+        theme(legend.position = "top",
+                legend.title = element_text(size = 4),
+                legend.text = element_text(size = 5),
+                plot.title = element_text(size = 6, face = "bold"),
+                plot.subtitle = element_text(size = 6),
+                axis.title = element_text(size = 6),
+                axis.text = element_text(size = 6)) +
+        annotate("text", x = min(proseq_data$baseMean, na.rm = TRUE), 
+                y = max(proseq_data$log2FoldChange, na.rm = TRUE), 
+                hjust = -3, vjust = 1, 
+                label = annotation_text, 
+                size = 1.5)
+
+ggsave("proseq_ma-plot_redone_H1low_vs_scrm.pdf", plot = last_plot())
+
+# # Convert to DESeqResults
+# res <- as(se, "DESeqResults")
+# 
+# # Assign rownames (gene IDs)
+# rownames(res) <- proseq_data$gene_id
+# 
+# # Check
+# res
+# summary(res)
+# 
+# # Plot MA
+# plotMA(res, ylim = c(-5, 5))
+
+
+```
+
+
+
+
+```{r}
+
+# convert your results frame into a DataFrame
+df <- as(proseq_data[, c("baseMean", "log2FoldChange", "lfcSE", "stat")], "DataFrame")
+
+# give it the DESeqResults class
+class(df) <- c("DESeqResults", class(df))
+
+# plot
+plotMA(df, ylim = c(-5, 5))
+
+
+```
+
+
+# now I want to make a venn diagram of the proseq up genes vs rna-seq up genes
+
+```{r}
+
+proseq_up_genes = read_tsv("/lustre/fs4/home/rjohnson/pipelines/peak_calling_analysis_pipeline/proseq_data/proseq_up_genesID_with_coord.bed", col_names = FALSE, show_col_types = FALSE)
+
+
+# using my rna up genes 
+
+rna_seq_up_genes = read_tsv("./H1low_vs_Scrm_up_rna_seq_test_filt.bed", col_names = TRUE, show_col_types = FALSE)
+
+# rna_seq_up_genes = read_tsv("/lustre/fs4/risc_lab/scratch/iduba/linker-histone/RNA-seq/genes-of-interest/WTvslowup-genebody.bed", col_names = FALSE, show_col_types = FALSE)
+
+# rna_seq_up_genes = read_csv("/lustre/fs4/risc_lab/scratch/iduba/linker-histone/RNA-seq/compare/all-comparison-genelists/alldowngenes.csv", col_names = FALSE, show_col_types = FALSE)
+
+
+
+library(ggVennDiagram)
+
+proseq_up_gene_list = unique(as.list(proseq_up_genes$X5))
+
+rna_seq_up_gene_list = unique(as.list(rna_seq_up_genes$gene_id))
+# rna_seq_up_gene_list = unique(as.list(rna_seq_up_genes$X4))
+
+length(proseq_up_gene_list)
+length(rna_seq_up_gene_list)
+
+# all_genes = c(proseq_up_gene_list, rna_seq_up_gene_list) 
+all_genes = unlist(unique(c(proseq_up_gene_list, rna_seq_up_gene_list)))
+
+# make a true false table
+new_df = data.frame( up_proseq_genes = all_genes %in% proseq_up_gene_list, up_rna_seq_genes = all_genes %in% rna_seq_up_gene_list)
+
+new_df['genes'] = all_genes
+
+new_df
+
+# gene_lists <- list(
+#   PROseq = new_df$genes[new_df$proseq_genes],
+#   RNAseq = new_df$genes[new_df$rna_seq_genes]
+# )
+# 
+# ggVennDiagram(gene_lists) +
+#   scale_fill_gradient(low = "white", high = "blue") +
+#   theme(legend.position = "none")
+
+
+
+
+
+library(ggvenn)
+
+# Provide the boolean‐table style input:
+proseq_vs_rnaseq_venn = ggvenn(
+  new_df,
+  show_elements = FALSE,
+  element_column = "genes"
+)
+
+proseq_vs_rnaseq_venn
+
+ggsave("venn_diagram_proseq_vs_rna_seq_genes_filt_both_pairs_mapped.pdf", plot = last_plot())
+
+# extracting the table data
+
+
+venn_table = get_venn_table(proseq_vs_rnaseq_venn)
+
+venn_table[1,] # this represents all the genes that are true in both
+overlapping_genes = venn_table[1,]$values # this will give back the genes of those that are true in both
+
+overlapping_gene_df = as.data.frame(overlapping_genes, col.names = "overlapping_Genes")
+
+rna_seq_df = as.data.frame(rna_seq_up_genes)
+
+keep = which(overlapping_gene_df$overlapping_Genes %in% rna_seq_df$gene_id)
+length(keep)
+overlapping_genes_with_stats_df = rna_seq_df[keep,]
+
+# keep_proseq_data = which(overlapping_gene_df$overlapping_Genes %in% as.data.frame(proseq_up_genes)$X5)
+# proseq_up_genes[keep_proseq_data]
+
+# write_tsv(overlapping_genes_with_stats_df, file = "overlapping_proseq_vs_rnaseq_genes_stats.tsv", col_names = TRUE)
+
+
+```
+

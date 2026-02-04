@@ -1,0 +1,365 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+# loading the bam files and running deseq2
+
+```{r}
+
+
+library(DESeq2)
+library(readr)
+library(dplyr)
+library(Rsubread)
+library(rtracklayer)
+
+H1_rna_bam_files = list.files(path = "/lustre/fs4/risc_lab/scratch/iduba/linker-histone/RNA-seq/rep2/hg38-ERCC-UMI-alignment/", pattern = "H.*sortedByCoord.*bam$", full.names = TRUE)
+
+Scrm_rna_bam_files = list.files(path = "/lustre/fs4/risc_lab/scratch/iduba/linker-histone/RNA-seq/rep2/hg38-ERCC-UMI-alignment/", pattern = "scr.*sortedByCoord.*bam$", full.names = TRUE)
+
+
+all_bams = c(H1_rna_bam_files, Scrm_rna_bam_files)
+
+# using featurecounts from rsubread to get the counts table
+
+#featureCounts(all_bams, annot.inbuilt = "hg38", isPairedEnd = TRUE)
+# should comment it out also for future runs
+# ill keep this here so i can look at the results but run it again stored into a variable in a new R chunk
+```
+
+```{r}
+
+# gtf_for_fc = "/lustre/fs4/risc_lab/scratch/iduba/linker-histone/RNA-seq/rep2/gencode.v38_ERCC.gtf"
+
+# using this gtf file because the gene id's are normal without the .# digigs behind them
+# gtf_for_fc = "/lustre/fs4/home/rjohnson/pipelines/gtf_files/hg38.ensGene.gtf"
+
+gtf_for_fc = "/lustre/fs4/home/rjohnson/pipelines/gtf_files/gencode.v38_ERCC.gtf"
+
+rna_seq_fc_object = featureCounts(all_bams, annot.inbuilt = "hg38", annot.ext = gtf_for_fc , isGTFAnnotationFile = TRUE, isPairedEnd = TRUE, useMetaFeatures = TRUE, requireBothEndsMapped = TRUE)
+
+```
+
+
+```{r}
+# here I need to get the ercc gene ids so I can match it with the gene ids I extract later and not the gene names
+
+temp_gtf_df = read_tsv(gtf_for_fc, col_names = c("seqnames", "source", "feature", "start", "end","score", "strand", "frame", "gene_info"), comment = "#")
+temp_gtf_df
+
+gtf_df_extract <- temp_gtf_df %>%
+  mutate(
+    gene_id = str_extract(gene_info, '(?<=gene_id \")[^\"]+'),
+    gene_name = str_extract(gene_info, '(?<=gene_name \")[^\"]+')
+  )
+
+gtf_df_extract$gene_id
+
+# needed to remove the extra period and number at the end of the gene_id
+tokens = strsplit(gtf_df_extract$gene_id, "\\.")
+
+base_ids = sapply(tokens, `[`,  1)
+base_ids
+
+gtf_df_extract['gene_id'] = base_ids
+gtf_df_extract
+
+# now only keep the ERRCC rows then get those gene ids into a list
+
+keep = grep( "ERCC", gtf_df_extract$gene_name)
+keep
+# keep = which(gtf_df_extract$gene_name == "ERCC")
+
+ERCC_info_df = gtf_df_extract[keep, ]
+
+ERCC_info_df
+
+# now I only want to keep the gene_id from this
+ercc_gene_ids_only = ERCC_info_df$gene_id
+
+unique_ercc_gene_ids = unique(ercc_gene_ids_only)
+
+```
+
+
+
+```{r}
+
+rna_seq_fc_object$counts
+
+# i need to get the gene names and remove the period and trailing number
+gene_tokens = strsplit(rownames(rna_seq_fc_object$counts), "\\.")
+gene_names_row = sapply(gene_tokens, `[`, 1)
+
+rownames(rna_seq_fc_object$counts) = gene_names_row 
+
+# now making the matrix
+rna_seq_matrix = as.matrix(rna_seq_fc_object$counts)
+
+# now loading into a deseq2 object
+coldata = colnames(rna_seq_matrix)
+
+condition_name = c("H1low", "Scrm")
+condition_num = 3
+type_name = c("r1", "r2", "r3")
+type_num = 2
+
+condition_factor = sort(factor(rep(condition_name, times = condition_num))) # sorted this 3 hlow and 3 scrm
+condition_factor
+type_factor = factor(rep(type_name, times = type_num)) # dont sort this, i want 123, 123
+type_factor
+
+new_condition_factor = relevel(condition_factor, levels(condition_factor)[2])
+design_formula = DataFrame(new_condition_factor , type_factor)
+design_formula
+
+rownames(design_formula) = coldata
+
+# colnames(rna_seq_matrix) = design_formula
+
+# coldata_2 = matrix(condition, type)
+coldata
+
+
+
+dds = DESeqDataSetFromMatrix(countData = rna_seq_matrix, colData = design_formula, design = ~ new_condition_factor )
+
+dds
+
+# dds = na.omit(dds)
+
+# if the controlGenes parameter needs to be numeric or logical, just find which rows in dds are in unique_ercc_genes_ids and use that list of numbers to identify the rows that are the control genes
+control_gene_ercc_in_dds = which(rownames(dds) %in% unique_ercc_gene_ids)
+
+dds = estimateSizeFactors(dds, controlGenes = control_gene_ercc_in_dds)
+
+dds = DESeq(dds)
+keep <- rowSums(counts(dds)) >= 10
+dds <- dds[keep,]
+
+res = results(dds)
+res
+
+resLFC = lfcShrink(dds, coef= resultsNames(dds)[2], type = "apeglm")
+
+up_reg = resLFC[which(resLFC$padj < 0.05 & resLFC$log2FoldChange >= 1) ,]
+up_reg
+# length(up_reg[,1])
+nrow((up_reg))
+
+# check down reg genes
+down_reg = resLFC[which(resLFC$padj < 0.05 & resLFC$log2FoldChange <= -1) ,]
+down_reg
+# length(down_reg[,1])
+nrow(down_reg)
+
+
+unchanging_reg = resLFC[which(resLFC$padj < 0.05 & resLFC$log2FoldChange <1 & resLFC$log2FoldChange > -1) ,]
+unchanging_reg
+nrow(unchanging_reg)
+
+others_reg = resLFC[which(resLFC$padj > 0.05), ]   
+others_reg
+nrow(others_reg)
+
+# now to save to a bed file using rtracklayer
+
+# export.bed(as.GRanges(up_reg), con = "H1low_vs_Scrm_up_rna_seq.bed")
+
+
+gtf_df = read_tsv(gtf_for_fc, col_names = c("seqnames", "source", "feature", "start", "end","score", "strand", "frame", "gene_info"), comment = "#")
+gtf_df
+
+
+library(stringr)
+
+# Extract fields from the attributes column
+gtf_df_clean <- gtf_df %>%
+  mutate(
+    gene_id = str_extract(gene_info, '(?<=gene_id \")[^\"]+'),
+    gene_name = str_extract(gene_info, '(?<=gene_name \")[^\"]+')
+  )
+
+# needed to remove the extra period and number at the end of the gene_id
+tokens = strsplit(gtf_df_clean$gene_id, "\\.")
+
+base_ids = sapply(tokens, `[`,  1)
+base_ids
+
+gtf_df_clean['gene_id'] = base_ids
+
+
+genes_only <- gtf_df_clean %>%
+  group_by(gene_id, seqnames, strand) %>%
+  summarise(start = min(start), end = max(end), gene_name = first(gene_name)) %>%
+  ungroup()
+
+genes_only
+
+# had to make the row names that contain the gene ids into a column called "gene_id"
+up_reg["gene_id"] = row.names(up_reg)
+up_reg
+
+annotated_up_reg <- genes_only %>%
+  inner_join(as.data.frame(up_reg), by = "gene_id")
+
+annotated_up_reg
+
+up_reg_gr = makeGRangesFromDataFrame(annotated_up_reg, keep.extra.columns = TRUE)
+
+export.bed(up_reg_gr,  con = "H1low_vs_Scrm_up_rna_seq_gr_obj_filt.bed")
+
+# testing this way
+# this works and keeps the extra columns
+
+as.data.frame(up_reg_gr) %>% 
+  dplyr::select(-width) %>% 
+  write_tsv(
+     
+    "H1low_vs_Scrm_up_rna_seq_test_filt.bed", col_names = TRUE
+  )
+
+# write_tsv(
+#   as_tibble(up_reg_gr), 
+#   "H1low_vs_Scrm_up_rna_seq_test.bed"
+# )
+
+
+
+##################### now the down genes ######################
+
+down_reg["gene_id"] = row.names(down_reg)
+down_reg
+
+annotated_down_reg <- genes_only %>%
+  inner_join(as.data.frame(down_reg), by = "gene_id")
+
+annotated_down_reg
+
+down_reg_gr = makeGRangesFromDataFrame(annotated_down_reg, keep.extra.columns = TRUE)
+
+export.bed(down_reg_gr,  con = "H1low_vs_Scrm_down_rna_seq_gr_obj_filt.bed")
+
+# testing this way
+# this works and keeps the extra columns
+
+as.data.frame(down_reg_gr) %>% 
+  dplyr::select(-width) %>% 
+  write_tsv(
+     
+    "H1low_vs_Scrm_down_rna_seq_test_filt.bed", col_names = FALSE
+  )
+
+# write_tsv(
+#   as_tibble(down_reg_gr), 
+#   "H1low_vs_Scrm_down_rna_seq_test.bed"
+# )
+
+##################### now the unchanging genes ######################
+
+unchanging_reg["gene_id"] = row.names(unchanging_reg)
+unchanging_reg
+
+annotated_unchanging_reg <- genes_only %>%
+  inner_join(as.data.frame(unchanging_reg), by = "gene_id")
+
+annotated_unchanging_reg
+
+unchanging_reg_gr = makeGRangesFromDataFrame(annotated_unchanging_reg, keep.extra.columns = TRUE)
+unchanging_reg_gr
+export.bed(unchanging_reg_gr,  con = "H1low_vs_Scrm_unchanging_rna_seq_gr_obj_filt.bed")
+
+# testing this way
+# this works and keeps the extra columns
+as.data.frame(unchanging_reg_gr) %>% 
+  dplyr::select(-width) %>% 
+  write_tsv(
+     
+    "H1low_vs_Scrm_unchanging_rna_seq_test_filt.bed", col_names = FALSE
+  )
+
+
+# bed_df <- annotated_up_reg %>%
+#   mutate(
+#     name = gene_name,
+#     score = -log10(padj)
+#   ) %>%
+#   select(seqnames, start, end, name, score, strand)
+
+# gene_ids <- gtf_df_clean %>% filter(feature == "gene_id") %>% mutate(gene_id = paste0(seqnames, ":", start, "-", end))
+
+```
+
+
+# now to make the ma plot
+```{r}
+
+# up_reg = proseq_data[which(proseq_data$padj < 0.05 & proseq_data$log2FoldChange >= 1) ,]
+#         
+#         
+# down_reg = proseq_data[which(proseq_data$padj < 0.05 & proseq_data$log2FoldChange <= -1/1.5) ,]
+# 
+# 
+# unchanging_reg = proseq_data[which(proseq_data$padj < 0.05 & proseq_data$log2FoldChange <1 & proseq_data$log2FoldChange > -1) ,]
+# 
+# others_reg = proseq_data[which(proseq_data$padj > 0.05), ] 
+
+
+total <- nrow(resLFC)
+up_pct <- round(100 * nrow(up_reg) / total, 1)
+down_pct <- round(100 * nrow(down_reg) / total, 1)
+ns_pct <- round(100 * nrow(others_reg) / total, 1)
+padj_only_pct <- round(100 * nrow(unchanging_reg) / total, 1)
+
+# Annotation text
+annotation_text <- paste0(
+"Upregulated geness: ", nrow(up_reg), " (", up_pct, "%)\n",
+"Downregulated genes: ", nrow(down_reg), " (", down_pct, "%)\n",
+"padj < 0.05 only: ", nrow(unchanging_reg), " (", padj_only_pct, "%)\n",
+"Not significant: ", nrow(others_reg), " (", ns_pct, "%)"
+)
+
+resLFC$Label <- ifelse(resLFC$padj > 0.05, "Not significant",
+                            ifelse(resLFC$log2FoldChange >= 1 & resLFC$padj < 0.05, "Upregulated genes",
+                            ifelse(resLFC$log2FoldChange <= -1/1.5 & resLFC$padj < 0.05, "Downregulated genes",
+                            ifelse(resLFC$log2FoldChange >= 1 & resLFC$padj > 0.05, "Not significant",
+                            ifelse(resLFC$log2FoldChange <= -1/1.5 & resLFC$padj > 0.05, "Not significant",
+                                    "padj < 0.05 only")))))
+
+ggplot(resLFC, aes(x = baseMean, y = log2FoldChange, color = Label)) +
+        geom_point(alpha = 0.7, size = 0.5) +
+        geom_hline(yintercept = 0, linetype = "solid", color = "black") +
+        geom_hline(yintercept = c(-1/1.5, 1), linetype = "dashed", color = "black") +
+        scale_x_continuous(trans = "log10", 
+                            breaks = scales::trans_breaks("log10", function(x) 10^x),
+                            labels = scales::trans_format("log10", scales::math_format(10^.x))) +
+        scale_colour_manual(values = c("Upregulated genes" = "red",
+                                        "Downregulated genes" = "red",
+                                        "padj < 0.05 only" = "lightpink",
+                                        "Not significant" = "grey70"),
+                            breaks = c("Upregulated genes", "Downregulated genes", "padj < 0.05 only", "Not significant")) +
+        labs(title = "rna-seq H1low vs scrm ERCC spike-in",
+            x = "Mean rna-seq signal (log10 scale)",
+            y = expression(Log[2]~Fold~Change),
+            color = "rna-seq status") +
+        theme_classic(base_size = 4) +
+        theme(legend.position = "top",
+                legend.title = element_text(size = 4),
+                legend.text = element_text(size = 5),
+                plot.title = element_text(size = 6, face = "bold"),
+                plot.subtitle = element_text(size = 6),
+                axis.title = element_text(size = 6),
+                axis.text = element_text(size = 6)) +
+        annotate("text", x = min(resLFC$baseMean, na.rm = TRUE), 
+                y = max(resLFC$log2FoldChange, na.rm = TRUE), 
+                hjust = -3, vjust = 1, 
+                label = annotation_text, 
+                size = 1.5)
+
+ggsave("rnaseq_ma-plot_redone_H1low_vs_scrm_with_ercc_spike_in.pdf", plot = last_plot())
+
+```
+
+

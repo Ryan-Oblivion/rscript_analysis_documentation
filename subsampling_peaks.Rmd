@@ -1,0 +1,369 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+```{r}
+
+library(readr)
+library(GenomicRanges)
+library(BSgenome.Hsapiens.UCSC.hg38)
+
+down_k27me3_peaks = './nextflow_R_script_outputs/H3K27me3/down_H3K27me3_ScrH1lo_regulated_peaks.bed'
+
+other_k27me3_peaks = './nextflow_R_script_outputs/H3K27me3/others_H3K27me3_ScrH1lo_regulated_peaks.bed'
+
+
+other_peaks_df = read_tsv(other_k27me3_peaks, col_names = FALSE, show_col_types = FALSE)
+other_peaks_df['peak_lengths'] = other_peaks_df$X3 - other_peaks_df$X2
+other_genomic_range = sum(other_peaks_df$peak_lengths)
+other_genomic_range
+
+# this will find the lengths of each peak and then add the lengths together to find the range of genomic space they all span.
+down_peak_df = read_tsv(down_k27me3_peaks, col_names = FALSE, show_col_types = FALSE)
+
+down_peak_df['peak_lengths'] = down_peak_df$X3 - down_peak_df$X2
+
+down_genomic_range = sum(down_peak_df$peak_lengths)
+down_genomic_range
+
+# now make a granges object from the down_peaks_df
+down_granges_obj = GRanges(seqnames = down_peak_df$X1, IRanges(start= down_peak_df$X2 , end = down_peak_df$X3), category = "down_peaks")
+
+# now. for the other peaks
+
+other_granges_obj = GRanges(seqnames = other_peaks_df$X1, IRanges(start = other_peaks_df$X2 , end = other_peaks_df$X3), category = "other_peaks")
+
+# i think I need to just subsample the up ATAC peaks also
+up_atac_file = './test_atac_data_pipeline/nextflow_R_script_outputs/ATAC/up_ATAC_dH1scr_regulated_peaks.bed'
+
+up_atac_df = read_tsv(up_atac_file, col_names = FALSE, show_col_types = FALSE)
+
+up_atac_gr = GRanges(seqnames = up_atac_df$X1, IRanges(start = up_atac_df$X2, end = up_atac_df$X3), category = "up_atac_peaks")
+
+# other atac-seq peaks that dont pass padj 
+other_atac_file = './test_atac_data_pipeline/nextflow_R_script_outputs/ATAC/others_ATAC_dH1scr_regulated_peaks.bed'
+
+other_atac_df = read_tsv(other_atac_file, col_names = FALSE, show_col_types = FALSE)
+
+other_atac_gr = GRanges(seqnames = other_atac_df$X1, IRanges(start = other_atac_df$X2, end = other_atac_df$X3), category = "other_atac_peaks")
+
+
+
+
+```
+
+
+# now I want to bin the genome and randomly subsample so that the other peaks have the same number and similar genomic coverage
+
+```{r}
+hg38_info = seqinfo(BSgenome.Hsapiens.UCSC.hg38)
+
+# inspect the object to see the chromosome and lengths
+print(hg38_info)
+
+# now binning the genome by 10kb bins
+
+#10kb bins
+bin_size = 7000000
+
+# if want to try binning the genome by 100 bins, then use the parameter ntile = 100
+
+# tilegenome aids in this
+
+binned_genome_hg38 = tileGenome(hg38_info, tilewidth = bin_size, cut.last.tile.in.chrom = TRUE)
+
+print(binned_genome_hg38)
+
+```
+
+```{r}
+
+# we could combine all the peaks into a single granges object
+# 
+# all_peaks_object = c(down_granges_obj, other_granges_obj)
+# all_peaks_object
+# 
+# peaks_in_bins_gr = subsetByOverlaps(all_peaks_object, binned_genome_hg38, ignore.strand = TRUE)
+# 
+# # Find overlaps between peaks and bins
+# overlaps <- findOverlaps(peaks_in_bins_gr, binned_genome_hg38, ignore.strand = TRUE)
+# overlaps
+# 
+# peaks_with_bin_info_gr = peaks_in_bins_gr[queryHits(overlaps)]
+# 
+# peaks_with_bin_info_gr$bin_id = binned_genome_hg38$bin_id[subjectHits(overlaps)]
+# 
+# overlap_df = as.data.frame(overlaps)
+# 
+# # Add bin_id to the peaks metadata
+# overlap_df$bin_id <- binned_genome_hg38$bin_id[overlap_df$subjectHits]
+# 
+# peaks_in_bins <- all_peaks_object[!is.na(all_peaks_object$bin_id)]
+```
+
+
+```{r}
+
+# trying this
+
+set.seed(42) # reproducible sampling
+
+# 1) Map down peaks to bins
+ov_down <- findOverlaps(down_granges_obj, binned_genome_hg38)
+# keep one bin per down-peak (if a peak hits multiple bins, keep the first hit)
+ov_down_df <- as.data.frame(ov_down)
+ov_down_df <- ov_down_df[!duplicated(ov_down_df$queryHits), ]
+# table: number of down peaks per bin (subjectHits are bin indices)
+down_counts_table <- table(ov_down_df$subjectHits)
+# convert to named integer vector mapping bin index -> count
+down_counts <- as.integer(down_counts_table)
+names(down_counts) <- names(down_counts_table) # character bin indices
+
+# 2) Map unchanging peaks to bins (one bin per peak)
+ov_unc <- findOverlaps(other_granges_obj, binned_genome_hg38)
+ov_unc_df <- as.data.frame(ov_unc)
+ov_unc_df <- ov_unc_df[!duplicated(ov_unc_df$queryHits), ]
+
+# For faster lookup, split the unchanging peak query indices by bin index
+unc_by_bin <- split(ov_unc_df$queryHits, ov_unc_df$subjectHits) 
+# names(unc_by_bin) are bin indices (character)
+
+# 3) For each bin that has down peaks, sample same number from unchanging peaks
+sampled_unc_peak_indices <- integer(0)
+
+for (bin_idx_char in names(down_counts)) {
+  desired_n <- down_counts[[bin_idx_char]]
+  # get available unchanging peak indices for this bin (may be NULL)
+  avail <- unc_by_bin[[bin_idx_char]]
+  if (is.null(avail) || length(avail) == 0L) {
+    # no unchanging peaks in this bin -> skip or log
+    next
+  }
+  take_n <- min(desired_n, length(avail))
+  sampled <- sample(avail, take_n)
+  sampled_unc_peak_indices <- c(sampled_unc_peak_indices, sampled)
+}
+
+# 4) Extract sampled GRanges
+sampled_unchanging <- other_peaks_df[unique(sampled_unc_peak_indices),]
+# Remove rows with any NA in seq/start/end
+sampled_unchanging <- sampled_unchanging[complete.cases(sampled_unchanging[, c("X1", "X2", "X3")]), ]
+
+sampled_unchanging_gr = GRanges(seqnames = sampled_unchanging$X1, IRanges(start = sampled_unchanging$X2, end = sampled_unchanging$X3))
+# sampled_unchanging now has, per-bin, up to the same number of peaks as down_peaks
+# quick sanity check:
+# counts per bin for down and sampled unchanging
+sampled_ov <- findOverlaps(sampled_unchanging_gr, binned_genome_hg38)
+sampled_df <- as.data.frame(sampled_ov)
+sampled_df <- sampled_df[!duplicated(sampled_df$queryHits), ]
+sampled_counts <- table(sampled_df$subjectHits)
+
+# Compare (example)
+down_counts
+sampled_counts
+
+# now to save the subsampled other peaks in a file, then check if we have the same abount of peaks as down peaks
+library(rtracklayer)
+export(sampled_unchanging_gr, "other_H3K27me3_ScrH1lo_regulated_peaks_subsampled.bed", format = "BED")
+
+
+```
+
+
+```{r}
+
+
+# trying this for the up atac peaks now
+
+set.seed(42) # reproducible sampling
+
+# use this here up_atac_gr
+
+# 1) Map up atac peaks to bins
+ov_down <- findOverlaps(up_atac_gr, binned_genome_hg38)
+# keep one bin per down-peak (if a peak hits multiple bins, keep the first hit)
+ov_down_df <- as.data.frame(ov_down)
+ov_down_df <- ov_down_df[!duplicated(ov_down_df$queryHits), ]
+# table: number of down peaks per bin (subjectHits are bin indices)
+down_counts_table <- table(ov_down_df$subjectHits)
+# convert to named integer vector mapping bin index -> count
+down_counts <- as.integer(down_counts_table)
+names(down_counts) <- names(down_counts_table) # character bin indices
+
+
+# use this here other_atac_gr
+
+# 2) Map other atac peaks to bins (one bin per peak)
+ov_upatac <- findOverlaps(other_atac_gr, binned_genome_hg38)
+ov_upatac_df <- as.data.frame(ov_upatac)
+ov_upatac_df <- ov_upatac_df[!duplicated(ov_upatac_df$queryHits), ]
+
+# For faster lookup, split the unchanging peak query indices by bin index
+upatac_by_bin <- split(ov_upatac_df$queryHits, ov_upatac_df$subjectHits) 
+# names(unc_by_bin) are bin indices (character)
+
+# 3) For each bin that has down peaks, sample same number from unchanging peaks
+sampled_upatac_peak_indices <- integer(0)
+
+for (bin_idx_char in names(down_counts)) {
+  desired_n <- down_counts[[bin_idx_char]]
+  # get available unchanging peak indices for this bin (may be NULL)
+  avail <- upatac_by_bin[[bin_idx_char]]
+  if (is.null(avail) || length(avail) == 0L) {
+    # no unchanging peaks in this bin -> skip or log
+    next
+  }
+  take_n <- min(desired_n, length(avail))
+  sampled <- sample(avail, take_n)
+  sampled_upatac_peak_indices <- c(sampled_upatac_peak_indices, sampled)
+}
+
+# 4) Extract sampled GRanges
+sampled_upatac <- other_atac_df[unique(sampled_upatac_peak_indices),]
+# Remove rows with any NA in seq/start/end
+sampled_upatac <- sampled_upatac[complete.cases(sampled_upatac[, c("X1", "X2", "X3")]), ]
+
+sampled_upatac_gr = GRanges(seqnames = sampled_upatac$X1, IRanges(start = sampled_upatac$X2, end = sampled_upatac$X3))
+# sampled_unchanging now has, per-bin, up to the same number of peaks as down_peaks
+# quick sanity check:
+# counts per bin for down and sampled unchanging
+sampled_ov <- findOverlaps(sampled_upatac_gr, binned_genome_hg38)
+sampled_df <- as.data.frame(sampled_ov)
+sampled_df <- sampled_df[!duplicated(sampled_df$queryHits), ]
+sampled_counts <- table(sampled_df$subjectHits)
+
+# Compare (example)
+down_counts
+sampled_counts
+
+# now to save the subsampled other peaks in a file, then check if we have the same abount of peaks as down peaks
+library(rtracklayer)
+export(sampled_upatac_gr, "./test_atac_data_pipeline/other_atac_ScrH1lo_regulated_peaks_subsampled.bed", format = "BED")
+
+
+
+```
+
+
+
+# just make a function to take your query data and subsample your target data to match the query data 
+
+```{r}
+
+# maybe i should input a file instead and have the function do everything
+subsample_function = function (query_data_file, target_data_file, genome_bin_choice) {
+  
+  query_df = read_tsv(query_data_file, col_names = FALSE, show_col_types = FALSE)
+  
+  target_df = read_tsv(target_data_file, col_names = FALSE, show_col_types = FALSE)
+  
+  query_data_gr_object = GRanges(seqnames = query_df$X1, IRanges(start = query_df$X2, end = query_df$X3), category = "query_data")
+  
+  target_data_gr_object = GRanges(seqnames = target_df$X1, IRanges(start = target_df$X2, end = target_df$X3), category = "target_data")
+  
+  # query_data_gr_object, target_data_gr_object
+  
+  
+  # i need the dataframe in here also so maybe turn the gr object back into a df
+  # target_df = as.data.frame(target_data_gr_object)
+  
+  set.seed(42) # reproducible sampling
+  
+  # this will be the query_data, where we find the counts we want to have the same of in our target data
+  
+  # 1) Map up atac peaks to bins
+  ov_query <- findOverlaps(query_data_gr_object, genome_bin_choice)
+  # keep one bin per down-peak (if a peak hits multiple bins, keep the first hit)
+  ov_query_df <- as.data.frame(ov_query)
+  ov_query_df <- ov_query_df[!duplicated(ov_query_df$queryHits), ]
+  # table: number of down peaks per bin (subjectHits are bin indices)
+  query_counts_table <- table(ov_query_df$subjectHits)
+  # convert to named integer vector mapping bin index -> count
+  query_counts <- as.integer(query_counts_table)
+  names(query_counts) <- names(query_counts_table) # character bin indices
+  
+  
+  # this will be the target data
+  
+  # 2) Map other target peaks to bins (one bin per peak)
+  ov_target <- findOverlaps(target_data_gr_object, genome_bin_choice)
+  ov_target_df <- as.data.frame(ov_target)
+  ov_target_df <- ov_target_df[!duplicated(ov_target_df$queryHits), ]
+  
+  # For faster lookup, split the target peak query indices by bin index
+  target_by_bin <- split(ov_target_df$queryHits, ov_target_df$subjectHits) 
+  # names(target_by_bin) are bin indices (character)
+  
+  
+  # 3) For each bin that has down peaks, sample same number from unchanging peaks
+  sampled_target_peak_indices <- integer(0)
+  
+  for (bin_idx_char in names(query_counts)) {
+    desired_n <- query_counts[[bin_idx_char]]
+    # get available unchanging peak indices for this bin (may be NULL)
+    avail <- target_by_bin[[bin_idx_char]]
+    if (is.null(avail) || length(avail) == 0L) {
+      # no unchanging peaks in this bin -> skip or log
+      next
+    }
+    take_n <- min(desired_n, length(avail))
+    sampled <- sample(avail, take_n)
+    sampled_target_peak_indices <- c(sampled_target_peak_indices, sampled)
+  }
+  
+  
+  # 4) Extract sampled GRanges
+  sampled_target <- target_df[unique(sampled_target_peak_indices),]
+  # Remove rows with any NA in seq/start/end
+  sampled_target <- sampled_target[complete.cases(sampled_target[, c("X1", "X2", "X3")]), ]
+  
+  sampled_target_gr = GRanges(seqnames = sampled_target$X1, IRanges(start = sampled_target$X2, end = sampled_target$X3))
+  # sampled_unchanging now has, per-bin, up to the same number of peaks as down_peaks
+  # quick sanity check:
+  # counts per bin for down and sampled unchanging
+  sampled_ov <- findOverlaps(sampled_target_gr, genome_bin_choice)
+  sampled_df <- as.data.frame(sampled_ov)
+  sampled_df <- sampled_df[!duplicated(sampled_df$queryHits), ]
+  sampled_counts <- table(sampled_df$subjectHits)
+  
+  # Compare (example)
+  query_counts
+  sampled_counts
+  
+  # now to save the subsampled other peaks in a file, then check if we have the same abount of peaks as down peaks
+  # library(rtracklayer)
+  
+  # target_name_tokens = split(target_data_file, "_")
+  
+  
+  # output_name = paste0()
+  # export(sampled_target_gr, "./test_atac_data_pipeline/other_atac_ScrH1lo_regulated_peaks_subsampled.bed", format = "BED")
+
+  return(sampled_target_gr)
+  
+  
+  
+  
+}
+
+# this below gives back the correct number of subsampled peaks for the other atac as what I got with out doing so in a function.
+# the function works
+
+#subsample_function(up_atac_file, other_atac_file, binned_genome_hg38 )
+
+# now I want to subsample the up proseq genes with the unchanging proseq genes 
+
+# query
+up_proseq_genes = '/lustre/fs4/home/rjohnson/pipelines/peak_calling_analysis_pipeline/proseq_data/proseq_up_genesID_with_coord.bed'
+
+# target
+unchanging_proseq_genes = '/lustre/fs4/home/rjohnson/pipelines/peak_calling_analysis_pipeline/proseq_data/proseq_unchanging_genesID_with_coord.bed'
+
+
+unchanging_proseq_genes_subsampled_gr = subsample_function(up_proseq_genes, unchanging_proseq_genes, binned_genome_hg38 )
+
+export.bed(unchanging_proseq_genes_subsampled_gr, "/lustre/fs4/home/rjohnson/pipelines/peak_calling_analysis_pipeline/proseq_data/proseq_unchanging_genes_subsampled.bed", format = "BED")
+```
+

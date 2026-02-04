@@ -1,0 +1,30 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+# I first want to parse the chromhmm states and save them into their own files
+```{r}
+
+library(rtracklayer)
+
+chromhmm_gr = import.bed(con = './chromHmm_k562/chromhmm_k562_hg38_ENCFF963KIA.bed', genome = "hg38")
+
+chromhmm_unique_names = unique(chromhmm_gr$name)
+
+for (name_choice in chromhmm_unique_names) {
+  
+  keep = chromhmm_gr$name == name_choice
+  
+  chromhmm_kept = chromhmm_gr[keep]
+  
+  fixed_name = gsub("/", "-", name_choice)
+  
+  out_filename = paste(fixed_name, "chromhmm_hg38_ENCFF963KIA.bed", sep = "_")
+  
+  export.bed(object = chromhmm_kept, con = paste0("./chromHmm_k562/", out_filename))
+}
+
+
+```
+

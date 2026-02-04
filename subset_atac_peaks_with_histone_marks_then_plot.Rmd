@@ -1,0 +1,273 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+# I want to get changing ATAC-seq peaks that are within the roadmap histone marks, then plot a pie chart
+
+```{r}
+
+library(readr)
+library(GenomicRanges)
+library(rtracklayer)
+# load changing atac seq peaks
+
+# up_atac_peaks = readr::read_tsv("./test_atac_data_pipeline/nextflow_R_script_outputs/ATAC/up_ATAC_regulated_peaks.bed", show_col_types = FALSE, col_names = FALSE)
+up_atac_peaks_rt = rtracklayer::import.bed("./test_atac_data_pipeline/nextflow_R_script_outputs/ATAC/up_ATAC_regulated_peaks.bed")
+
+
+# down_atac_peaks = readr::read_tsv("./test_atac_data_pipeline/nextflow_R_script_outputs/ATAC/down_ATAC_regulated_peaks.bed", show_col_types = FALSE, col_names = FALSE)
+down_atac_peaks_rt = import.bed("./test_atac_data_pipeline/nextflow_R_script_outputs/ATAC/down_ATAC_regulated_peaks.bed")
+
+# lets get the unchanging atac peaks
+unchanging_atac_peaks_rt = import.bed("./test_atac_data_pipeline/nextflow_R_script_outputs/ATAC/unchanging_ATAC_regulated_peaks.bed")
+
+# now get the histone marks 
+
+# I should just read all the histone marks in with list files
+
+histone_mark_files = list.files(path = "./roadmap_peaks_to_use/", all.files = FALSE, full.names = TRUE)
+
+
+# dataframe for storing how many up atac peaks are stored in each histone file
+
+up_atac_peaks_in_histone_df = DataFrame()
+# make the first column the total number of up peaks
+# up_atac_peaks_in_histone_df['total_up_peaks'] = length(up_atac_peaks_rt)
+
+down_atac_peaks_in_histone_df = DataFrame()
+# make the first column the total number of down peaks 
+# down_atac_peaks_in_histone_df['total_down_peaks'] = length(down_atac_peaks_rt)
+
+# I am only doing the jaccard index for the up atac peaks
+jaccard_of_up_atac_peaks_in_histone_df = DataFrame()
+
+# unchanging peaks jaccard method 
+jaccard_of_unchanging_atac_peaks_in_histone_df = DataFrame()
+
+# histone only denominator
+jaccard_of_up_atac_peaks_in_histone_denominator_df = DataFrame()
+
+for (i in c(1:length(histone_mark_files))) {
+  
+  # to load in narrow peak files, have to provide extra columns
+  
+  extraCols_narrowPeak = c(signalValue = "numeric", pValue = "numeric", 
+                          qValue = "numeric", summit = "numeric")
+  
+  histone_data = rtracklayer::import.bed(histone_mark_files[i], 
+                extraCols = extraCols_narrowPeak)
+  
+  # I might use the name as column name in a dataframe
+  histone_mark_name = last(unlist(strsplit( histone_mark_files[i], "/")))
+  
+  # now find the subset but record the atac-seq peaks
+  # subsetByOverlaps()
+  
+  # I might use count overlaps instead
+  # this is just getting the counts of how many atac-peaks are in the current histon mark in this loop
+  up_atac_peak_counts = sum(countOverlaps(histone_data, up_atac_peaks_rt, , minoverlap=5L))
+  
+  down_atac_peak_counts = sum(countOverlaps(histone_data, down_atac_peaks_rt, , minoverlap=5L))
+  
+  # but now I need to find the total lengths of the atac peaks found in the histone marks
+  # so I will first use find overlaps
+  up_atac_overlap_hits = findOverlaps(histone_data, up_atac_peaks_rt, , minoverlap=5L)
+  unchanging_atac_overlap_hits = findOverlaps(histone_data, unchainging_atac_peaks_rt, , minoverlap=5L)
+  # then find the subject indicies (atac rows that were hits)
+  up_atac_indicies_overlaps = subjectHits(up_atac_overlap_hits)
+  unchanging_atac_indicies_overlaps = subjectHits(unchanging_atac_overlap_hits)
+  
+  # then subset the up peaks with the indicies to get the rows that have the ranges where the atac peaks overlapped
+  final_up_atac_peaks_in_histone = up_atac_peaks_rt[up_atac_indicies_overlaps]
+  final_unchanging_atac_peaks_in_histone = unchanging_atac_peaks_rt[unchanging_atac_indicies_overlaps]
+  
+  # these here represent the atac-peaks AND histone_peaks (when looking at the numerator of the jaccard index formula)
+  # now to get the lengths by looking at ranges and taking the lengths
+  total_genomic_length_up_atac_peaks_in_histone = sum(final_up_atac_peaks_in_histone@ranges@width)
+  total_genomic_length_unchanging_atac_peaks_in_histone = sum(final_unchanging_atac_peaks_in_histone@ranges@width)
+  
+  # now to find the denominator is simple
+  # take the width of total up atac peaks, and the width of the total histone mark regions
+  
+  # this is the total up atac peaks
+  # total_genomic_region_up_atac = sum(up_atac_peaks_rt@ranges@width)
+  
+  # this is the total histone mark region for the mark in this current for loop
+  # total_genomic_region_histone_mark = sum(histone_data@ranges@width)
+  
+  # now I have to add the two totals up to get the denominator of the jaccard index
+  # this means atac peaks genomic total union histone mark genomic toatl
+  # A_union_B_denominator = total_genomic_region_up_atac + total_genomic_region_histone_mark
+  
+  # I actually need to merge the up atac and histone mark genomic ranges object then reduce to get the union of only unique regions in both
+  combined_genomic_ranges = c(up_atac_peaks_rt,histone_data)
+  combined_unch_genomic_ranges = c(unchanging_atac_peaks_rt,histone_data)
+  # then reducing to get the true union between up atac peaks and histone data
+  up_atac_union_histone_data = reduce(combined_genomic_ranges)
+  unchanging_atac_union_histone_data = reduce(combined_unch_genomic_ranges)
+  
+  # lets just try using the histone marks genomic regions alone as the denominator
+  histone_only_denominator = sum(histone_data@ranges@width)
+  
+  # now I have the true genomic length of up atac peaks union histone data
+  A_union_B_denominator = sum(up_atac_union_histone_data@ranges@width)
+  A_union_B_denominator_unchanging = sum(unchanging_atac_union_histone_data@ranges@width)
+  
+  # next, we take the genomic length of up atac peaks found in histone and divide by A union B denominator
+  jaccard_index_of_up_atac_peaks_in_histone = total_genomic_length_up_atac_peaks_in_histone/A_union_B_denominator
+  jaccard_index_of_unchanging_atac_peaks_in_histone = total_genomic_length_unchanging_atac_peaks_in_histone/A_union_B_denominator_unchanging
+  
+  jaccard_of_up_atac_peaks_in_histone_df[histone_mark_name] = jaccard_index_of_up_atac_peaks_in_histone
+  jaccard_of_unchanging_atac_peaks_in_histone_df[histone_mark_name] = jaccard_index_of_unchanging_atac_peaks_in_histone
+  
+  jaccard_index_histone_only_denominator = total_genomic_length_up_atac_peaks_in_histone/histone_only_denominator
+  jaccard_of_up_atac_peaks_in_histone_denominator_df[histone_mark_name] = jaccard_index_histone_only_denominator
+  
+  
+  # now have to save the above to a dataframe column 
+  
+  up_atac_peaks_in_histone_df[histone_mark_name] = up_atac_peak_counts
+  
+  down_atac_peaks_in_histone_df[histone_mark_name] = down_atac_peak_counts
+  
+  
+  # disjoin(granges(histone_data), granges(up_atac_peaks))
+  
+  
+  
+  
+  
+  
+}
+
+library(tidyr)
+
+
+# t(up_atac_peaks_in_histone_df)
+# new_test_df = data.frame(up_atac_peaks_in_histone_df)
+# t(new_test_df ) 
+
+
+# pivot_
+
+# now I need to plot a pie chart that shows the percentage of up peaks in each histone mark and for down peaks also
+
+# so appearantly I can transpose the DataFrame() with t(), then make it back into a data.frame() instead and then get the group_name and value columns
+
+new_up_peaks_in_histone = data.frame(t(up_atac_peaks_in_histone_df))
+
+new_down_peaks_in_histone = data.frame(t(down_atac_peaks_in_histone_df))
+
+# now transforming the jaccard index dataframe
+new_jaccard_up_atac_peaks_in_histone = data.frame(t(jaccard_of_up_atac_peaks_in_histone_df))
+
+# transformint the jaccard index df with the histone only denominator
+new_jaccard_up_atac_peaks_in_histone_only_denominator = data.frame(t(jaccard_of_up_atac_peaks_in_histone_denominator_df))
+
+library(ggplot2)
+
+up_atac_peaks_in_histone_pie = ggplot(new_up_peaks_in_histone, aes(x="", y=value/length(up_atac_peaks_rt), fill=group_name)) +
+  geom_bar(stat="identity", width=1) +
+  ggtitle("Up ATAC-seq peaks overlapping Histone marks")+
+  coord_polar("y", start=0) +
+  geom_text(aes(label = round(value/length(up_atac_peaks_rt), digits = 2)), position = position_stack(vjust = 0.5), size = 2)
+  
+
+down_atac_peaks_in_histone_pie = ggplot(new_down_peaks_in_histone, aes(x="", y=value/length(down_atac_peaks_rt), fill=group_name)) +
+  geom_bar(stat="identity", width=1) +
+  ggtitle("Down ATAC-seq peaks overlapping Histone marks")+
+  coord_polar("y", start=0)+
+  geom_text(aes(label = round(value/length(down_atac_peaks_rt), digits = 2)), position = position_stack(vjust = 0.5), size = 2)
+
+ggsave("up_atac_seq_peaks_overlapping_histone_marks.png", up_atac_peaks_in_histone_pie)
+
+ggsave("down_atac_seq_peaks_overlapping_histone_marks.png", down_atac_peaks_in_histone_pie)
+
+# down_atac_peaks_in_histone_pie
+up_atac_peaks_in_histone_pie
+
+
+
+jaccard_up_atac_peaks_in_histone_pie = ggplot(new_jaccard_up_atac_peaks_in_histone, aes(x="", y=value, fill=group_name)) +
+  geom_bar(stat="identity", width=1) +
+  ggtitle("Up ATAC-seq peaks overlapping Histone marks\n Jaccard index by genomic area covered")+
+  coord_polar("y", start=0) +
+  geom_text(aes(label = round(value, digits = 4)), position = position_stack(vjust = 0.5), size = 4)
+  
+
+jaccard_up_atac_peaks_in_histone_pie
+
+ggsave("jaccard_index_up_atac_seq_peaks_overlapping_histone_marks.png", jaccard_up_atac_peaks_in_histone_pie)
+
+
+# how about I try not making it into a pie chart
+
+jaccard_up_atac_peaks_in_histone_line = ggplot(new_jaccard_up_atac_peaks_in_histone, aes(x="", y=value, fill=group_name)) +
+  geom_bar(stat="identity", width=1) +
+  ggtitle("Up ATAC-seq peaks overlapping Histone marks\n Jaccard index by genomic area covered")+
+  geom_text(aes(label = round(value, digits = 4)), position = position_stack(vjust = 0.5), size = 4)
+
+jaccard_up_atac_peaks_in_histone_line
+
+ggsave("jaccard_index_up_atac_seq_peaks_overlapping_histone_marks_regionPlot.png", jaccard_up_atac_peaks_in_histone_line)
+
+
+jaccard_up_atac_peaks_in_histone_only_denominator_line = ggplot(new_jaccard_up_atac_peaks_in_histone_only_denominator, aes(x="", y=value, fill=group_name)) +
+  geom_bar(stat="identity", width=1) +
+  ggtitle("Up ATAC-seq peaks overlapping Histone marks\n Jaccard index by genomic area covered \n Using only the histone mark as denominator")+
+  geom_text(aes(label = round(value, digits = 4)), position = position_stack(vjust = 0.5), size = 4)
+
+jaccard_up_atac_peaks_in_histone_only_denominator_line
+
+ggsave("jaccard_index_up_atac_seq_peaks_overlapping_histone_marks_histone_only_denominator_regionPlot.png", jaccard_up_atac_peaks_in_histone_only_denominator_line)
+# 
+# ggplot(new_up_peaks_in_histone, aes(x="", y=value/length(up_atac_peaks_rt), fill=group_name)) +
+#   geom_bar(stat="identity", width=1) +
+#   ggtitle("Up ATAC-seq peaks overlapping Histone marks")+
+#   coord_polar("y", start=0)+
+#   geom_text(aes(label = round(value/length(up_atac_peaks_rt), digits = 2)), position = position_stack(vjust = 0.5), size = 2) 
+  # geom_text(aes(label = group_name), position = position_stack(vjust = 0.1))
+
+# now find a way to get out of all the roadmap peaks how many are in each 
+# so I will have two pie graphs, one showing the up and one showing the down peaks.
+
+
+```
+
+
+
+# scratch paper below
+```{r}
+# check to see if rtracklayer or genomic ranges can find regions that overlap
+
+extraCols_narrowPeak <- c(signalValue = "numeric", pValue = "numeric", 
+                          qValue = "numeric", summit = "integer")
+
+histone_data1 = import(histone_mark_files[1], format = "BED", 
+                extraCols = extraCols_narrowPeak)
+
+histone_data2 = import(histone_mark_files[2], format = "BED", 
+                extraCols = extraCols_narrowPeak)
+
+
+
+overlap = disjoin(c(granges(up_atac_peaks_rt), granges(histone_data)))
+
+# this code gives back the up_atac peaks that are in the histone data
+subset_overlap1 = subsetByOverlaps(histone_data1, up_atac_peaks_rt)
+
+subset_overlap2 = subsetByOverlaps(histone_data2, up_atac_peaks_rt)
+
+countOverlaps(histone_data2, up_atac_peaks_rt, maxgap=-1L, minoverlap=0L,
+    type=c("any", "start", "end", "within", "equal"),
+    ignore.strand=FALSE) 
+
+up_atac_peaks_in_histone_df
+
+```
+
+
+
+
+

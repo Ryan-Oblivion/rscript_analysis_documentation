@@ -1,0 +1,274 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+# first let's load the necessary files
+```{r}
+
+library(rtracklayer)
+library(GenomicRanges)
+
+# the two c-score condition files
+
+# h1low c-score regions
+h1low_corrected_cscore = rtracklayer::import.bed("/lustre/fs4/risc_lab/scratch/iduba/linker-histone/HiC/KH3/deepseq/combinedreps/chroms/low-corrected-cscore.bedgraph")
+
+scrm_corrected_cscore = rtracklayer::import.bed("/lustre/fs4/risc_lab/scratch/iduba/linker-histone/HiC/KH3/deepseq/combinedreps/chroms/scr-corrected-cscore.bedgraph")
+
+```
+
+
+# now lets load the proseq data
+```{r}
+
+# extraCols_gene_file = c(transcript = "string", gene_name = "string", strand = " string", gene_id = "string")
+
+# extraCols_gene_file = c(gene_id = "character")
+
+up_gene_regions_and_name = rtracklayer::import.bed("/lustre/fs4/home/rjohnson/pipelines/peak_calling_analysis_pipeline/proseq_data/proseq_up_genesID_with_coord_no_stats.bed" )
+
+unchanging_gene_regions_and_name = rtracklayer::import.bed("/lustre/fs4/home/rjohnson/pipelines/peak_calling_analysis_pipeline/proseq_data/proseq_unchanging_genesID_with_coord_no_stats.bed" )
+
+```
+
+# now I need to save the new genes that contain only the tss
+```{r}
+
+up_gene_regions_and_name_TSS_only = GenomicRanges::resize(up_gene_regions_and_name, width = 1)
+
+# now the unchanging genes 
+unchanging_gene_regions_and_name_TSS_only = GenomicRanges::resize(unchanging_gene_regions_and_name, width = 1)
+
+
+
+```
+
+# now to find which compartment scores intersect the gene tss
+# I need to keep the info on which compartment the gene was found in and record that compartment score
+```{r}
+
+# looks like its still best to use find overlaps
+
+h1low_up_gene_overlap_hits = findOverlaps(h1low_corrected_cscore, up_gene_regions_and_name_TSS_only )
+
+# the next two lines of code gets the index of which subject was found in the index of which query
+# then I need to get the up gene tss that actually fell in a compartment and save by indexing by the hits of the subject
+up_genes_in_h1low_compartments = up_gene_regions_and_name_TSS_only[subjectHits(h1low_up_gene_overlap_hits)]
+
+# indexing by the hits of the query
+h1low_compartments_that_had_up_genes = h1low_corrected_cscore[queryHits(h1low_up_gene_overlap_hits)]
+
+# now take the meta data col that contains the compartment score and put it on the granges object that has the gene tss and gene id/name
+h1low_c_score_for_genes = mcols(h1low_compartments_that_had_up_genes)
+
+up_genes_in_h1low_compartments@elementMetadata["h1low_c-score"] = h1low_c_score_for_genes
+
+# this should be the gene tss, with the gene name/id, with the compartment score for h1low
+up_genes_in_h1low_compartments
+
+# now I need to find the up genes that intersect the scrambled compartments which might be a different set of genes all together.
+# so that means I would need to do an intersection of the up gens in h1low compartments with the up genes in the scrm compartments
+
+# once I have that, I should be able to get the delta c-score and make a violin plot 
+
+```
+
+# now I need to find the up genes that intersect the scrambled compartments which might be a different set of genes all together.
+# so that means I would need to do an intersection of the up gens in h1low compartments with the up genes in the scrm compartments
+
+# once I have that, I should be able to get the delta c-score and make a violin plot 
+```{r}
+
+
+
+scrm_up_gene_overlap_hits = findOverlaps(scrm_corrected_cscore, up_gene_regions_and_name_TSS_only )
+
+# indexing subject hits
+up_genes_in_scrm_compartments = up_gene_regions_and_name_TSS_only[subjectHits(scrm_up_gene_overlap_hits)]
+
+# indexing by the hits of the query
+scrm_compartments_that_had_up_genes = scrm_corrected_cscore[queryHits(scrm_up_gene_overlap_hits)]
+
+# now take the meta data col that contains the compartment score and put it on the granges object that has the gene tss and gene id/name
+scrm_c_score_for_genes = mcols(scrm_compartments_that_had_up_genes)
+
+up_genes_in_scrm_compartments@elementMetadata["scrm_c-score"] = scrm_c_score_for_genes
+
+# this should be the gene tss, with the gene name/id, with the compartment score for h1low
+up_genes_in_scrm_compartments
+
+
+```
+
+
+# it looks like we have the same number of up genes found in each of the conditions
+# this makes it easy to just put the columns side by side and make a new column with the delta of h1low minus scrm
+```{r}
+
+# just make a new object that copies the h1low up genes with c-score
+
+final_up_genes_with_h1low_scrm_cscores = up_genes_in_h1low_compartments
+
+final_up_genes_with_h1low_scrm_cscores
+
+# now just take the scrm cscore column and put it in this final object
+final_up_genes_with_h1low_scrm_cscores@elementMetadata["scrm_c-score"] = mcols(up_genes_in_scrm_compartments)[2]
+
+final_up_genes_with_h1low_scrm_cscores
+
+# now do the subtraction of h1low and scrm c-scores
+
+final_up_genes_with_h1low_scrm_cscores@elementMetadata["delta_h1low_scrm_cscore"] = as.numeric(final_up_genes_with_h1low_scrm_cscores@elementMetadata$`h1low_c-score`) - as.numeric(final_up_genes_with_h1low_scrm_cscores@elementMetadata$`scrm_c-score`)
+
+# so now this is the final output for the up proseq genes
+final_up_genes_with_h1low_scrm_cscores
+
+```
+
+
+###################################
+# this section will be the unchanging genes
+
+# now to find which compartment scores intersect the gene tss
+# I need to keep the info on which compartment the gene was found in and record that compartment score
+```{r}
+
+# looks like its still best to use find overlaps
+
+h1low_unchanging_gene_overlap_hits = findOverlaps(h1low_corrected_cscore, unchanging_gene_regions_and_name_TSS_only )
+
+# the next two lines of code gets the index of which subject was found in the index of which query
+# then I need to get the up gene tss that actually fell in a compartment and save by indexing by the hits of the subject
+unchanging_genes_in_h1low_compartments = unchanging_gene_regions_and_name_TSS_only[subjectHits(h1low_unchanging_gene_overlap_hits)]
+
+# indexing by the hits of the query
+h1low_compartments_that_had_unchanging_genes = h1low_corrected_cscore[queryHits(h1low_unchanging_gene_overlap_hits)]
+
+# now take the meta data col that contains the compartment score and put it on the granges object that has the gene tss and gene id/name
+h1low_c_score_for_genes_unchanging = mcols(h1low_compartments_that_had_unchanging_genes)
+
+unchanging_genes_in_h1low_compartments@elementMetadata["h1low_c-score_unchanging"] = h1low_c_score_for_genes_unchanging
+
+# this should be the gene tss, with the gene name/id, with the compartment score for h1low
+unchanging_genes_in_h1low_compartments
+
+# now I need to find the up genes that intersect the scrambled compartments which might be a different set of genes all together.
+# so that means I would need to do an intersection of the up gens in h1low compartments with the up genes in the scrm compartments
+
+# once I have that, I should be able to get the delta c-score and make a violin plot 
+
+```
+
+# now I need to find the up genes that intersect the scrambled compartments which might be a different set of genes all together.
+# so that means I would need to do an intersection of the up gens in h1low compartments with the up genes in the scrm compartments
+
+# once I have that, I should be able to get the delta c-score and make a violin plot 
+```{r}
+
+
+
+scrm_unchanging_gene_overlap_hits = findOverlaps(scrm_corrected_cscore, unchanging_gene_regions_and_name_TSS_only )
+
+# indexing subject hits
+unchanging_genes_in_scrm_compartments = unchanging_gene_regions_and_name_TSS_only[subjectHits(scrm_unchanging_gene_overlap_hits)]
+
+# indexing by the hits of the query
+scrm_compartments_that_had_unchanging_genes = scrm_corrected_cscore[queryHits(scrm_unchanging_gene_overlap_hits)]
+
+# now take the meta data col that contains the compartment score and put it on the granges object that has the gene tss and gene id/name
+scrm_c_score_for_genes_unchanging = mcols(scrm_compartments_that_had_unchanging_genes)
+
+unchanging_genes_in_scrm_compartments@elementMetadata["scrm_c-score_unchanging"] = scrm_c_score_for_genes_unchanging
+
+# this should be the gene tss, with the gene name/id, with the compartment score for h1low
+unchanging_genes_in_scrm_compartments
+
+
+```
+
+
+# it looks like we have the same number of up genes found in each of the conditions
+# this makes it easy to just put the columns side by side and make a new column with the delta of h1low minus scrm
+```{r}
+
+# just make a new object that copies the h1low up genes with c-score
+
+final_unchanging_genes_with_h1low_scrm_cscores = unchanging_genes_in_h1low_compartments
+
+final_unchanging_genes_with_h1low_scrm_cscores
+
+# now just take the scrm cscore column and put it in this final object
+final_unchanging_genes_with_h1low_scrm_cscores@elementMetadata["scrm_c-score_unchanging"] = mcols(unchanging_genes_in_scrm_compartments)[2]
+
+final_unchanging_genes_with_h1low_scrm_cscores
+
+# now do the subtraction of h1low and scrm c-scores
+
+final_unchanging_genes_with_h1low_scrm_cscores@elementMetadata["delta_h1low_scrm_cscore_unchanging"] = as.numeric(final_unchanging_genes_with_h1low_scrm_cscores@elementMetadata$`h1low_c-score_unchanging`) - as.numeric(final_unchanging_genes_with_h1low_scrm_cscores@elementMetadata$`scrm_c-score_unchanging`)
+
+# so now this is the final output for the up proseq genes
+final_unchanging_genes_with_h1low_scrm_cscores
+
+```
+
+
+
+# now lets try the plotting
+```{r}
+
+# the data needs to be a dataframe
+
+final_up_genes_cscore_df = GenomicRanges::as.data.frame(final_up_genes_with_h1low_scrm_cscores)
+final_up_genes_cscore_df
+
+final_unchanging_cscore_df = GenomicRanges::as.data.frame(final_unchanging_genes_with_h1low_scrm_cscores)
+final_unchanging_cscore_df
+
+just_the_cscores_df = data.frame(final_up_genes_cscore_df$delta_h1low_scrm_cscore, final_unchanging_cscore_df$delta_h1low_scrm_cscore_unchanging, fix.empty.names = TRUE)
+just_the_cscores_df
+
+
+library(ggplot2)
+
+# now that I have the plot for the up genes delta c-score, I just have to ge the unchanging genes
+delta_cscore_violin_plot_up_unchanging_proseq_genes = ggplot() +
+  geom_violin( data = final_up_genes_cscore_df, aes(x = "up_genes", y = delta_h1low_scrm_cscore)) +
+  geom_violin(data = final_unchanging_cscore_df, aes(x = "unchanging_genes", y = delta_h1low_scrm_cscore_unchanging )) +
+  scale_y_continuous(limits = c(-2,2), n.breaks = 20)
+
+delta_cscore_violin_plot_up_unchanging_proseq_genes
+
+ggsave(filename = "delta_cscore_violin_plot_up_unchanging_genes.png", delta_cscore_violin_plot_up_unchanging_proseq_genes)
+
+# ggplot(final_unchanging_cscore_df, aes(x = "unchanging_genes", y = delta_h1low_scrm_cscore_unchanging ))+
+#   geom_violin(scale = "area")+
+#   geom_violin(data = final_up_genes_cscore_df, aes(x = "up_genes", y = delta_h1low_scrm_cscore))
+#   scale_y_continuous(limits = c(-2,2), n.breaks = 20)
+
+```
+
+
+
+
+# scrap paper below
+
+# play around with understanding how to get just the chromosome and start interval
+```{r}
+
+up_gene_regions_and_name
+
+GenomicRanges::resize(up_gene_regions_and_name, width = 1)
+
+
+```
+
+# checking the resize
+```{r}
+
+# lets go with the width of 1 to get the tss
+GenomicRanges::resize(up_gene_regions_and_name, width = 1)
+
+```
+

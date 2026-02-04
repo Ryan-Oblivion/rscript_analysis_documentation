@@ -1,0 +1,82 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+# getting the gene names from the gtf file that has gene ids also
+
+```{r}
+
+library(dplyr)
+library(readr)
+
+gtf_for_fc = "/lustre/fs4/home/rjohnson/pipelines/gtf_files/gencode.v38_ERCC.gtf"
+
+# irene's up rna seq genes
+# up_genes_irene = "/lustre/fs4/risc_lab/scratch/iduba/linker-histone/RNA-seq/rep2/hg38-ERCC-UMI-alignment/DESeq2_results/WTvslowup-genebody.bed"
+
+# up_genes_irene = "/lustre/fs4/risc_lab/scratch/iduba/linker-histone/RNA-seq/rep2/hg38-ERCC-UMI-alignment/DESeq2_results/WTvslownochange-genebody.bed"
+
+up_genes_irene = "/lustre/fs4/risc_lab/scratch/iduba/linker-histone/RNA-seq/rep2/hg38-ERCC-UMI-alignment/DESeq2_results/WTvslowdown-genebody.bed"
+
+
+```
+
+# getting the df for the gtf file
+```{r}
+
+temp_gtf_df = read_tsv(gtf_for_fc, col_names = c("seqnames", "source", "feature", "start", "end","score", "strand", "frame", "gene_info"), comment = "#")
+temp_gtf_df
+
+gtf_df_extract <- temp_gtf_df %>%
+  mutate(
+    gene_id = str_extract(gene_info, '(?<=gene_id \")[^\"]+'),
+    gene_name = str_extract(gene_info, '(?<=gene_name \")[^\"]+')
+  )
+
+gtf_df_extract$gene_id
+
+
+```
+
+
+# now renaming the gene_id column so the gene ids do not have a trailing point and number
+```{r}
+
+# needed to remove the extra period and number at the end of the gene_id
+tokens = strsplit(gtf_df_extract$gene_id, "\\.")
+
+base_ids = sapply(tokens, `[`,  1)
+base_ids
+
+gtf_df_extract['gene_id'] = base_ids
+unique_gtf_id_names = unique(gtf_df_extract[, c("gene_id", "gene_name")])
+```
+
+
+# now to load the up genes and get the gene names
+```{r}
+
+up_irene_genes = read_tsv(up_genes_irene, col_names = FALSE, show_col_types = FALSE)
+
+# which(gtf_df_extract$gene_id %in% up_irene_genes$X4)
+
+# now to merge the data by gene id and gene
+
+merged_irene_data = merge(up_irene_genes,
+                          unique_gtf_id_names[, c("gene_id", "gene_name")],
+                          by.x = "X4",
+                          by.y = "gene_id",
+                          all.x = FALSE)
+
+ordered_irene_up_genes = merged_irene_data[, c("X1", "X2","X3","X4","X5","X6","X7","gene_name")]
+
+write_tsv(ordered_irene_up_genes, file = "low_VS_wt_down_genename.bed", col_names = FALSE)
+
+```
+
+```{r}
+up_irene_genes
+```
+
+
