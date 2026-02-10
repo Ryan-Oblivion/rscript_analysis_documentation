@@ -229,14 +229,40 @@ final_unchanging_cscore_df
 just_the_cscores_df = data.frame(final_up_genes_cscore_df$delta_h1low_scrm_cscore, final_unchanging_cscore_df$delta_h1low_scrm_cscore_unchanging, fix.empty.names = TRUE)
 just_the_cscores_df
 
+# here is the wilcox test (mann whitney) to see if the two observations are significant or not
+wilcox_results_unchanging_up_delta_cscore = wilcox.test(final_up_genes_cscore_df$delta_h1low_scrm_cscore, final_unchanging_cscore_df$delta_h1low_scrm_cscore_unchanging, correct = TRUE, conf.int = TRUE, paired = FALSE)
+
+pval_between_up_and_unchanging_tss_cscore = wilcox_results_unchanging_up_delta_cscore$p.value
+pval_between_up_and_unchanging_tss_cscore
 
 library(ggplot2)
+library(ggpubr)
 
+up_df = final_up_genes_cscore_df[c("name", "delta_h1low_scrm_cscore")]
+up_df["group"] = "up_genes"
+unchanging_df = final_unchanging_cscore_df[c("name", "delta_h1low_scrm_cscore_unchanging")]
+library(dplyr)
+unchanging_df = rename(unchanging_df, delta_h1low_scrm_cscore = delta_h1low_scrm_cscore_unchanging) 
+unchanging_df["group"] = "unchanging_genes"
+
+# now to make one df
+final_combined_df = rbind(up_df, unchanging_df)
+
+
+ggplot() +
+  ggviolin( data = final_combined_df, x = "group", y = "delta_h1low_scrm_cscore" ) +
+  scale_y_continuous(limits = c(-2,2), n.breaks = 20)+
+  stat_compare_means( method = "wilcox.test")
+
+
+delta_cscore_violin_plot_up_unchanging_proseq_genes+
+  stat_compare_means( method = "wilcox.test", comparisons = list(c( "unchanging_genes", "up_genes")))
 # now that I have the plot for the up genes delta c-score, I just have to ge the unchanging genes
-delta_cscore_violin_plot_up_unchanging_proseq_genes = ggplot() +
-  geom_violin( data = final_up_genes_cscore_df, aes(x = "up_genes", y = delta_h1low_scrm_cscore)) +
-  geom_violin(data = final_unchanging_cscore_df, aes(x = "unchanging_genes", y = delta_h1low_scrm_cscore_unchanging )) +
-  scale_y_continuous(limits = c(-2,2), n.breaks = 20)
+# delta_cscore_violin_plot_up_unchanging_proseq_genes = ggplot() +
+#   geom_violin( data = final_up_genes_cscore_df, aes(x = "up_genes", y = delta_h1low_scrm_cscore) ) +
+#   geom_violin(data = final_unchanging_cscore_df, aes(x = "unchanging_genes", y = delta_h1low_scrm_cscore_unchanging ) ) +
+#   scale_y_continuous(limits = c(-2,2), n.breaks = 20)+
+#   stat_compare_means(paired = TRUE, method = wilcox.test(), )
 
 delta_cscore_violin_plot_up_unchanging_proseq_genes
 
@@ -253,6 +279,24 @@ ggsave(filename = "delta_cscore_violin_plot_up_unchanging_genes.png", delta_csco
 
 
 # scrap paper below
+
+# lets see the man whitney test to see significance
+```{r}
+
+test_results = wilcox.test(final_up_genes_cscore_df$delta_h1low_scrm_cscore, final_unchanging_cscore_df$delta_h1low_scrm_cscore_unchanging, correct = TRUE, conf.int = TRUE, paired = FALSE)
+
+test_results$p.value
+
+
+ggplot() +
+  geom_violin( data = final_up_genes_cscore_df, aes(x = "up_genes", y = delta_h1low_scrm_cscore) ) +
+  geom_violin(data = final_unchanging_cscore_df, aes(x = "unchanging_genes", y = delta_h1low_scrm_cscore_unchanging ) ) +
+  stat_compare_means(paired = TRUE, method = "wilcox.test", label = "p.signif") +
+  scale_y_continuous(limits = c(-2,2), n.breaks = 20)
+
+```
+
+
 
 # play around with understanding how to get just the chromosome and start interval
 ```{r}
