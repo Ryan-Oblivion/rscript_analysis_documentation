@@ -1,0 +1,92 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+getwd()
+```
+
+
+# I need to get the paths for the up atac-seq peaks and the paths for the genehancer bed file that has promoters and enhancers
+```{r}
+up_atac_peaks = "./test_atac_data_pipeline/nextflow_R_script_outputs/ATAC/up_ATAC_dH1scr_regulated_peaks.bed"
+
+# looks like we need to look at the distal atac-seq peaks instead
+distal_up_atac_peaks = "./test_atac_data_pipeline/up_ATAC_annotated_peaks_Distal_Intergenic_feature.bed"
+
+genehancer_promo_enhance = "/lustre/fs4/risc_lab/scratch/jyeung/GeneHancer_Files/GeneHancer_AnnotSV_elements_v5.12.txt"
+```
+
+
+
+# now to load the packages to manipulate the ranges to find overlap
+```{r}
+
+library(GenomicRanges)
+library(rtracklayer)
+
+up_atac_distal_intergenic_peaks = read.table(distal_up_atac_peaks, sep = "\t")
+up_atac_distal_intergenic_peaks[4:17]
+
+up_atac_distal_gr = GRanges(up_atac_distal_intergenic_peaks$V1, ranges = IRanges(start = up_atac_distal_intergenic_peaks$V2, end = up_atac_distal_intergenic_peaks$V3))
+
+# then adding the metadata columns to the new genomic rances list
+mcols(up_atac_distal_gr) = up_atac_distal_intergenic_peaks[4:17]
+
+up_atac_distal_gr
+
+
+# now loading in the genehancer data
+
+genehancer_data = read.table(genehancer_promo_enhance, sep = "\t", header = TRUE)
+
+genehancer_data
+# need to replace the number with chr number
+
+genehancer_data$chr = paste0("chr", genehancer_data$chr)
+
+genehancer_data
+
+# now to make the genomicranges object
+
+genehancer_data_gr = GRanges(seqnames = genehancer_data$chr, ranges = IRanges(start = genehancer_data$element_start, end = genehancer_data$element_end))
+
+# now to add the metadata columns
+genehancer_data[,4:6]
+
+mcols(genehancer_data_gr) = genehancer_data[,4:6]
+
+# and this is the final genehancer object
+genehancer_data_gr
+
+```
+
+# now looking to see how these two intersect
+
+```{r}
+
+#intersect(up_atac_distal_gr, genehancer_data_gr)
+
+# will want to use findoverlaps instead to get back the ranges from 
+
+genehancer_up_atac_overlaps_summary = GenomicRanges::findOverlaps(query = genehancer_data_gr, subject = up_atac_distal_gr )
+
+genehancer_up_atac_overlaps_summary
+
+# now I need to get the query hits number which will be the index for genehancer and use that to find which ranges had atac-seq peaks
+
+query_hits_genehancer_index = genehancer_up_atac_overlaps_summary@from
+query_hits_genehancer_index
+
+
+# now use that index to get the regions in genehancer that has up distal atac peaks
+
+genehancer_data_gr[query_hits_genehancer_index,]
+
+# just to test
+#genehancer_data_gr[818,]
+
+```
+
+

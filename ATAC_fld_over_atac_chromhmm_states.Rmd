@@ -1,0 +1,207 @@
+
+```{r}
+
+library(GenomicRanges)
+library(Rsamtools)
+library(rtracklayer)
+library(ggplot2)
+library(dplyr)
+# first load in the first two atac-seq bams to get the fragment lengths
+
+# rep_1_atac_bams = list.files(path = './atac_bams/atac_shifted_bams/', pattern = '*ATAC_1.*bam$', full.names = TRUE )
+
+
+
+rep1_dH1_bam = rep_1_atac_bams[1]
+rep1_scrm_bam = rep_1_atac_bams[2]
+
+dh1_allmerge_bam = list.files(path = './atac_bams/atac_shifted_bams/merged_shifted_bams/', pattern = '*dH1.*bam$', full.names = TRUE )
+scr_allmerge_bam = list.files(path = './atac_bams/atac_shifted_bams/merged_shifted_bams/', pattern = '*scr.*bam$', full.names = TRUE )
+
+
+bed_dir = "/lustre/fs4/home/rjohnson/pipelines/merged_hera_arnold_analysis/peak_calling_workflow/test_atac_data_pipeline/test_bampe/new_atac_allmerge_subset_by_chromhmm"
+
+
+dH1_bed_files = list.files(path = bed_dir, pattern = '*dH1.*bed$', full.names = TRUE)
+
+scr_bed_files = list.files(path = bed_dir, pattern = '*scr.*bed$', full.names = TRUE)
+
+
+
+```
+
+
+#dH1 first
+```{r}
+
+# h1low first
+param <- ScanBamParam(
+  flag = scanBamFlag(isProperPair = TRUE, isSecondaryAlignment = FALSE, isDuplicate = FALSE),
+  what = c("rname", "pos", "isize")
+)
+bam <- scanBam(dh1_allmerge_bam, param = param)[[1]]
+
+# Compute fragment end and make GRanges
+frag_lengths <- abs(bam$isize)
+fragments <- GRanges(seqnames = bam$rname,
+                     ranges = IRanges(start = bam$pos, width = frag_lengths))
+
+# Keep only reasonable fragment lengths
+fragments <- fragments[width(fragments) < 1000 & width(fragments) > 0]
+
+
+```
+
+
+# dH1 still
+```{r}
+frag_data_list <- list()
+
+for (bed in dH1_bed_files) {
+  state_name <- gsub(".bed$", "", basename(bed))
+  peaks <- import(bed)
+  
+  ov <- findOverlaps(fragments, peaks)
+  frag_subset <- fragments[queryHits(ov)]
+  
+  frag_data_list[[state_name]] <- data.frame(
+    state = state_name,
+    length = width(frag_subset)
+  )
+}
+
+frag_data <- bind_rows(frag_data_list)
+
+```
+
+
+# plotting the combined fragment data
+```{r}
+ggplot(frag_data, aes(x = length, color = state)) +
+  geom_density(size = 1) +
+  xlim(0, 1000) +
+  labs(
+    title = "dH1 ATAC-seq fragment length distribution by ChromHMM state",
+    x = "Fragment length (bp)",
+    y = "Density"
+  ) +
+  theme_bw() +
+  theme(
+    legend.position = "right",
+    legend.key.size = unit(0.6, "cm"),   # 🔹 adjust box size
+    legend.text = element_text(size = 6), # 🔹 adjust label text
+    legend.title = element_blank()
+  )
+
+ggsave("dH1_ATAC_fragment_length_by_state.pdf", width = 8, height = 6)
+
+
+```
+
+# faceted histogram
+```{r}
+
+
+ggplot(frag_data, aes(x = length)) +
+  geom_histogram(bins = 100, fill = "steelblue") +
+  facet_wrap(~ state, scales = "free_y") +
+  xlim(0, 1000) +
+  theme_bw() +
+  labs(
+    title = "dH1 Fragment length distribution by ChromHMM state",
+    x = "Fragment length (bp)",
+    y = "Count"
+  )
+
+ggsave("dH1_ATAC_fragment_length_by_state_faceted_histogram.pdf", width = 8, height = 6)
+```
+
+
+
+
+# NOW SCR
+
+#scr first
+```{r}
+
+# h1low first
+param <- ScanBamParam(
+  flag = scanBamFlag(isProperPair = TRUE, isSecondaryAlignment = FALSE, isDuplicate = FALSE),
+  what = c("rname", "pos", "isize")
+)
+bam <- scanBam(scr_allmerge_bam, param = param)[[1]]
+
+# Compute fragment end and make GRanges
+frag_lengths <- abs(bam$isize)
+fragments <- GRanges(seqnames = bam$rname,
+                     ranges = IRanges(start = bam$pos, width = frag_lengths))
+
+# Keep only reasonable fragment lengths
+fragments <- fragments[width(fragments) < 1000 & width(fragments) > 0]
+
+
+```
+
+
+# scr still
+```{r}
+frag_data_list <- list()
+
+for (bed in scr_bed_files) {
+  state_name <- gsub(".bed$", "", basename(bed))
+  peaks <- import(bed)
+  
+  ov <- findOverlaps(fragments, peaks)
+  frag_subset <- fragments[queryHits(ov)]
+  
+  frag_data_list[[state_name]] <- data.frame(
+    state = state_name,
+    length = width(frag_subset)
+  )
+}
+
+frag_data_scr <- bind_rows(frag_data_list)
+
+```
+
+
+# plotting the combined fragment data
+```{r}
+ggplot(frag_data_scr, aes(x = length, color = state)) +
+  geom_density(size = 1) +
+  xlim(0, 1000) +
+  labs(
+    title = "Scr ATAC-seq fragment length distribution by ChromHMM state",
+    x = "Fragment length (bp)",
+    y = "Density"
+  ) +
+  theme_bw() +
+  theme(
+    legend.position = "right",
+    legend.key.size = unit(0.6, "cm"),   # 🔹 adjust box size
+    legend.text = element_text(size = 6), # 🔹 adjust label text
+    legend.title = element_blank()
+  )
+
+ggsave("scr_ATAC_fragment_length_by_state.pdf", width = 8, height = 6)
+
+
+```
+
+# faceted histogram
+```{r}
+
+
+ggplot(frag_data_scr, aes(x = length)) +
+  geom_histogram(bins = 100, fill = "steelblue") +
+  facet_wrap(~ state, scales = "free_y") +
+  xlim(0, 1000) +
+  theme_bw() +
+  labs(
+    title = "Scr Fragment length distribution by ChromHMM state",
+    x = "Fragment length (bp)",
+    y = "Count"
+  )
+
+ggsave("scr_ATAC_fragment_length_by_state_faceted_histogram.pdf", width = 8, height = 6)
+```

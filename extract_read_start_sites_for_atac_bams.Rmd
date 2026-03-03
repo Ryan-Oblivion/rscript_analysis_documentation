@@ -1,0 +1,103 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+# now will take inspiration from Joanna and get the tn5 insertion sites and save the coverage as a bigwig
+
+# but first have to check if I can skip the steps for bam files that already had their reads shifted to account for the tn5 gap
+
+# essentially this script should be for bam files that already used a tool like deeptools alignmentsieve --ATACshift
+
+# if I want to use this script in nextflow I would just make a channel that has all the bams and input it in a process that runs the r code natively and not a script
+
+```{r}
+library(GenomicAlignments)
+library(GenomicRanges)
+
+library(rtracklayer)
+
+
+# load the atac shifted bams
+getwd()
+atac_shifted_bams = list.files(path = "./test_atac_data_pipeline/atac_bams/atac_shifted_bams/", pattern = "*ATAC.*bam$", full.names = TRUE)
+
+list_of_names = c()
+for (i in atac_shifted_bams){
+  # print(i)
+  names_of_files = unlist(str_split(basename(i), pattern = "\\."))[1]
+  # print(names_of_files)
+  
+  list_of_names = append(list_of_names, names_of_files) 
+  print(list_of_names)
+  
+}
+
+
+#import the size factor file
+atac_seq_sizefactor_table = read.table(file = "./test_atac_data_pipeline/nextflow_R_script_outputs/ATAC/size_factor_calculation.tsv", sep = "\t", header = TRUE)
+
+names(atac_shifted_bams) = list_of_names
+# now I can take the bam files and use genomic alignment to load in the reads and resize them to only the start coordinate
+num = 1 
+# list_of_readcuts_coverage = c()
+for (atac_bam in atac_shifted_bams){
+  
+  print(names(atac_shifted_bams[num]))
+  bam_data = readGAlignmentPairs(atac_bam)
+  
+  # getting the forward reads
+  forward_reads = bam_data@first
+  
+  # getting the reverse reads
+  reverse_reads = bam_data@last
+  
+  # resize to only get the start positions of the forward and reverse reads, but use fix="start" so it is strand aware and thus gets the end position as the start position for the reverse reads.
+  forward_read_start = resize(GRanges(forward_reads), fix = "start", width = 1)
+  
+  reverse_read_start = resize(GRanges(reverse_reads), fix = "start", width = 1)
+  
+  # save the reads to a list
+  reads_cut = c(forward_read_start, reverse_read_start)
+  
+  reads_coverage = coverage(reads_cut)
+  
+  # list_of_readcuts_coverage[[num]] = reads_coverage
+  
+  
+  # lets just make the bigwig here
+  # I should normalize by size factor using the sizefactor file I have generated for hugo
+  #test_names_sizefactor[grep(paste0(names(atac_shifted_bams)[2],"*"), test_names_sizefactor)]
+  # this above is something that works where i get the name from the current loop, and paste a star at the end to grep the correct index from the size factor table
+  
+  # here I get the name and see what index it is in the size factor table
+  correct_file_index = grep(paste0(names(atac_shifted_bams)[num],"*"), atac_seq_sizefactor_table[,1]) 
+  
+  # then take that correct file index and get the size factor number from the 2 column in that row
+  correct_sizeFactor_num = atac_seq_sizefactor_table[correct_file_index, 2]
+  
+  # now multiply the coverage by this size factor
+  normalized_reads_coverage = reads_coverage * correct_sizeFactor_num
+  
+  rtracklayer::export.bw(reads_coverage, con = paste0("./test_atac_data_pipeline/",names(atac_shifted_bams)[num], "_CutsCoverage.bigwig"))
+  
+  # the normalized bigwigs
+  rtracklayer::export.bw(normalized_reads_coverage, con = paste0("./test_atac_data_pipeline/", "normalized_by_SF_", names(atac_shifted_bams)[num], "_CutsCoverage.bigwig"))
+  
+  
+  
+  num = num+1
+}
+
+
+```
+
+# see if there is a deeptools library for plotting in R
+
+```{r}
+
+
+
+
+```
+

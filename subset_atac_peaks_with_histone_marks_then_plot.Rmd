@@ -73,7 +73,7 @@ for (i in c(1:length(histone_mark_files))) {
   # but now I need to find the total lengths of the atac peaks found in the histone marks
   # so I will first use find overlaps
   up_atac_overlap_hits = findOverlaps(histone_data, up_atac_peaks_rt, , minoverlap=5L)
-  unchanging_atac_overlap_hits = findOverlaps(histone_data, unchainging_atac_peaks_rt, , minoverlap=5L)
+  unchanging_atac_overlap_hits = findOverlaps(histone_data, unchanging_atac_peaks_rt, , minoverlap=5L)
   # then find the subject indicies (atac rows that were hits)
   up_atac_indicies_overlaps = subjectHits(up_atac_overlap_hits)
   unchanging_atac_indicies_overlaps = subjectHits(unchanging_atac_overlap_hits)
@@ -165,6 +165,9 @@ new_jaccard_up_atac_peaks_in_histone = data.frame(t(jaccard_of_up_atac_peaks_in_
 # transformint the jaccard index df with the histone only denominator
 new_jaccard_up_atac_peaks_in_histone_only_denominator = data.frame(t(jaccard_of_up_atac_peaks_in_histone_denominator_df))
 
+new_jaccard_unchanging_atac_peaks_in_histone_dataframe = data.frame(t(jaccard_of_unchanging_atac_peaks_in_histone_df))
+
+
 library(ggplot2)
 
 up_atac_peaks_in_histone_pie = ggplot(new_up_peaks_in_histone, aes(x="", y=value/length(up_atac_peaks_rt), fill=group_name)) +
@@ -211,6 +214,7 @@ jaccard_up_atac_peaks_in_histone_line = ggplot(new_jaccard_up_atac_peaks_in_hist
 jaccard_up_atac_peaks_in_histone_line
 
 ggsave("jaccard_index_up_atac_seq_peaks_overlapping_histone_marks_regionPlot.png", jaccard_up_atac_peaks_in_histone_line)
+ggsave("jaccard_index_up_atac_seq_peaks_overlapping_histone_marks_regionPlot.pdf",device = "pdf", jaccard_up_atac_peaks_in_histone_line)
 
 
 jaccard_up_atac_peaks_in_histone_only_denominator_line = ggplot(new_jaccard_up_atac_peaks_in_histone_only_denominator, aes(x="", y=value, fill=group_name)) +
@@ -221,6 +225,22 @@ jaccard_up_atac_peaks_in_histone_only_denominator_line = ggplot(new_jaccard_up_a
 jaccard_up_atac_peaks_in_histone_only_denominator_line
 
 ggsave("jaccard_index_up_atac_seq_peaks_overlapping_histone_marks_histone_only_denominator_regionPlot.png", jaccard_up_atac_peaks_in_histone_only_denominator_line)
+
+
+
+# new_jaccard_unchanging_atac_peaks_in_histone_dataframe
+
+jaccard_unchanging_atac_peaks_in_histone_only_line = ggplot(new_jaccard_unchanging_atac_peaks_in_histone_dataframe, aes(x="", y=value, fill=group_name)) +
+  geom_bar(stat="identity", width=1) +
+  ggtitle("Unchanging ATAC-seq peaks overlapping Histone marks\n Jaccard index by genomic area covered")+
+  geom_text(aes(label = round(value, digits = 4)), position = position_stack(vjust = 0.5), size = 4)
+
+jaccard_unchanging_atac_peaks_in_histone_only_line
+
+ggsave("jaccard_index_unchanging_atac_seq_peaks_overlapping_histone_marks__regionPlot.png", jaccard_unchanging_atac_peaks_in_histone_only_line)
+ggsave("jaccard_index_unchanging_atac_seq_peaks_overlapping_histone_marks__regionPlot.pdf", device = "pdf", jaccard_unchanging_atac_peaks_in_histone_only_line)
+
+
 # 
 # ggplot(new_up_peaks_in_histone, aes(x="", y=value/length(up_atac_peaks_rt), fill=group_name)) +
 #   geom_bar(stat="identity", width=1) +

@@ -128,6 +128,36 @@ final_up_genes_with_h1low_scrm_cscores
 ```
 
 
+
+# checking to make a df with just the h1low and scrm then add a group column
+```{r}
+
+final_up_genes_with_h1low_scrm_cscores
+
+new_h1low_up_gene_df = data.frame(gene = final_up_genes_with_h1low_scrm_cscores$name, c_score = as.numeric(final_up_genes_with_h1low_scrm_cscores$`h1low_c-score`), condition = "h1low")
+
+new_scrm_up_gene_df = data.frame(gene = final_up_genes_with_h1low_scrm_cscores$name, c_score = as.numeric(final_up_genes_with_h1low_scrm_cscores$`scrm_c-score`), condition = "scrm")
+
+new_split_up_gene_df = rbind(new_h1low_up_gene_df, new_scrm_up_gene_df)
+
+new_split_up_gene_df['group'] = "up_genes"
+
+new_split_up_gene_df
+
+# ggplot() +
+#   ggviolin(data = new_split_up_gene_df, x = "group", y = "c_score")+
+#   scale_y_continuous(limits = c(-2,2), n.breaks = 20)
+
+# this is just to see how it looks when I plot the h1low separately from the scrm for the up genes
+ggplot() +
+  ggviolin(data = new_split_up_gene_df, x = "group", y = "c_score", fill = "condition", position = position_dodge())
+
+```
+
+
+
+
+
 ###################################
 # this section will be the unchanging genes
 
@@ -226,8 +256,8 @@ final_up_genes_cscore_df
 final_unchanging_cscore_df = GenomicRanges::as.data.frame(final_unchanging_genes_with_h1low_scrm_cscores)
 final_unchanging_cscore_df
 
-just_the_cscores_df = data.frame(final_up_genes_cscore_df$delta_h1low_scrm_cscore, final_unchanging_cscore_df$delta_h1low_scrm_cscore_unchanging, fix.empty.names = TRUE)
-just_the_cscores_df
+# just_the_cscores_df = data.frame(final_up_genes_cscore_df$delta_h1low_scrm_cscore, final_unchanging_cscore_df$delta_h1low_scrm_cscore_unchanging, fix.empty.names = TRUE)
+# just_the_cscores_df
 
 # here is the wilcox test (mann whitney) to see if the two observations are significant or not
 wilcox_results_unchanging_up_delta_cscore = wilcox.test(final_up_genes_cscore_df$delta_h1low_scrm_cscore, final_unchanging_cscore_df$delta_h1low_scrm_cscore_unchanging, correct = TRUE, conf.int = TRUE, paired = FALSE)
@@ -249,14 +279,18 @@ unchanging_df["group"] = "unchanging_genes"
 final_combined_df = rbind(up_df, unchanging_df)
 
 
-ggplot() +
-  ggviolin( data = final_combined_df, x = "group", y = "delta_h1low_scrm_cscore" ) +
+delta_cscore_violin_plot_up_unchanging_proseq_genes = ggplot() +
+  ggviolin( data = final_combined_df, x = "group", y = "delta_h1low_scrm_cscore" , fill = "group") +
   scale_y_continuous(limits = c(-2,2), n.breaks = 20)+
-  stat_compare_means( method = "wilcox.test")
+  stat_compare_means( method = "wilcox.test", label = "p.signif")+
+  stat_compare_means( label.y = 1, step.increase = 1, bracket.size = 5)
+
+# ggplot(data = final_combined_df, aes(x = group, y = delta_h1low_scrm_cscore, fill = group)) +
+#   geom_violin() +
+#   geom_signif(comparisons = list(c("up_genes", "unchanging_genes")), map_signif_level = TRUE, test = "wilcox.test")
 
 
-delta_cscore_violin_plot_up_unchanging_proseq_genes+
-  stat_compare_means( method = "wilcox.test", comparisons = list(c( "unchanging_genes", "up_genes")))
+
 # now that I have the plot for the up genes delta c-score, I just have to ge the unchanging genes
 # delta_cscore_violin_plot_up_unchanging_proseq_genes = ggplot() +
 #   geom_violin( data = final_up_genes_cscore_df, aes(x = "up_genes", y = delta_h1low_scrm_cscore) ) +
@@ -267,6 +301,8 @@ delta_cscore_violin_plot_up_unchanging_proseq_genes+
 delta_cscore_violin_plot_up_unchanging_proseq_genes
 
 ggsave(filename = "delta_cscore_violin_plot_up_unchanging_genes.png", delta_cscore_violin_plot_up_unchanging_proseq_genes)
+ggsave(filename = "delta_cscore_violin_plot_up_unchanging_genes.pdf", device = "pdf", delta_cscore_violin_plot_up_unchanging_proseq_genes)
+ggsave(filename = "delta_cscore_violin_plot_up_unchanging_genes.svg", device = "svg", delta_cscore_violin_plot_up_unchanging_proseq_genes)
 
 # ggplot(final_unchanging_cscore_df, aes(x = "unchanging_genes", y = delta_h1low_scrm_cscore_unchanging ))+
 #   geom_violin(scale = "area")+
@@ -286,6 +322,8 @@ ggsave(filename = "delta_cscore_violin_plot_up_unchanging_genes.png", delta_csco
 test_results = wilcox.test(final_up_genes_cscore_df$delta_h1low_scrm_cscore, final_unchanging_cscore_df$delta_h1low_scrm_cscore_unchanging, correct = TRUE, conf.int = TRUE, paired = FALSE)
 
 test_results$p.value
+
+wilcox.test(as.numeric(final_up_genes_cscore_df$h1low_c.score), as.numeric(final_up_genes_cscore_df$scrm_c.score))
 
 
 ggplot() +

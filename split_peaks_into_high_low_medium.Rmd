@@ -1,0 +1,72 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+getwd()
+```
+
+
+
+```{r}
+
+# down_k27me3_peaks = rtracklayer::import.bed("./nextflow_R_script_outputs/H3K27me3/down_H3K27me3_H1loScr_regulated_peaks.bed")
+# down_k27me3_peaks = read.table("/lustre/fs4/home/rjohnson/pipelines/peak_calling_analysis_pipeline/nextflow_R_script_outputs/H3k9me3/down_H3k9me3_H1lowScrm_regulated_peaks.tsv", row.names = NULL)
+
+down_k27me3_peaks = read.table("./nextflow_R_script_outputs/H3K27me3/down_H3K27me3_H1loScr_regulated_peaks.tsv", row.names = NULL)
+
+test_df = as.data.frame(down_k27me3_peaks)
+test_df
+
+test_gr = GRanges(test_df$row.names)
+test_gr
+
+mcols(test_gr) = test_df[2:6]
+
+lfc_vector = test_gr@elementMetadata$log2FoldChange
+
+# this splits the object by looking at the log2fc vector and getting the different quantiles
+log2fc_categories = cut(
+  lfc_vector,
+  breaks = quantile(lfc_vector, prob = c(0, 1, 0.75, 0.25)),
+  labels = c("high", "medium", "low"), # high should be a large negative number and low should be a small negative number
+  include.lowest =TRUE
+  
+  )
+
+mcols(test_gr)["log2fc_categories"] = log2fc_categories
+
+test_gr
+
+# just subset the granges object to get the low, medium, and high categories separate
+high_test_gr = test_gr[test_gr@elementMetadata$log2fc_categories == "high",]
+
+low_test_gr = test_gr[test_gr@elementMetadata$log2fc_categories == "low",]
+
+medium_test_gr = test_gr[test_gr@elementMetadata$log2fc_categories == "medium",]
+
+
+# now need to save this
+
+high_lfc_df = as.data.frame(high_test_gr)
+medium_lfc_df = as.data.frame(medium_test_gr)
+low_lfc_df = as.data.frame(low_test_gr)
+
+write.table(high_lfc_df, file = "down_H3K27me3_H1loScr_regulated_highLFC_peaks.tsv", quote = FALSE, sep = "\t", row.names = FALSE, col.names = TRUE)
+
+write.table(medium_lfc_df, file = "down_H3K27me3_H1loScr_regulated_mediumLFC_peaks.tsv", quote = FALSE, sep = "\t", row.names = FALSE, col.names = TRUE)
+
+write.table(low_lfc_df, file = "down_H3K27me3_H1loScr_regulated_lowLFC_peaks.tsv", quote = FALSE, sep = "\t", row.names = FALSE, col.names = TRUE)
+
+# rtracklayer::export(high_test_gr, con = "down_H3K27me3_H1loScr_regulated_highLFC_peaks.bed")
+# 
+# rtracklayer::export.bed(medium_test_gr, con = "down_H3K27me3_H1loScr_regulated_mediumLFC_peaks.bed")
+# 
+# rtracklayer::export.bed(low_test_gr, con = "down_H3K27me3_H1loScr_regulated_lowLFC_peaks.bed")
+
+
+```
+
+
+
